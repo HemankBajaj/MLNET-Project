@@ -1,8 +1,10 @@
 # Early Termination Strategy for Speed Test
 # Project Proposal
 
-> Hemank Bajaj 2020CS10349
-> Dhruv Tyagi 2020CS10341
+```
+Hemank Bajaj, 2020CS10349
+Dhruv Tyagi, 2020CS10341
+```
 
 ## Goals and Objectives
 
