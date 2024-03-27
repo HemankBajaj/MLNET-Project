@@ -1,58 +1,55 @@
 # Early Termination Strategy for Speed Test
-# Project Proposal
+# Progress Report
 
 ```
 Hemank Bajaj, 2020CS10349
 Dhruv Tyagi, 2020CS10341
 ```
 
-## Goals and Objectives
-
-1. Develop an early termination strategy for speed tests to optimize the trade-off between data overhead and information about network quality.
-2. Formulate the problem of test termination as a reinforcement learning (RL) problem to enable intelligent decision-making.
-3. Train the RL model using PCAP data from M-Lab Speed tests to learn effective termination policies.
-4. Evaluate the proposed solution to quantify data savings achieved versus information loss incurred.
+Github Link : [https://github.com/HemankBajaj/MLNET-Project](https://github.com/HemankBajaj/MLNET-Project)
 
 
-## Solution Sketch
+## Problem Formulation
+The problem at hand is to determine the optimal termination policy for conducting speed tests based on the observed states and rewards in a reinforcement learning (RL) framework. In this scenario, the RL agent aims to learn when to terminate a speed test connection to balance the need for collecting network quality information with minimizing data overhead.
 
-The proposed solution involves developing an intelligent early termination strategy for speed tests using reinforcement learning. Here's a sketch of the solution:
+## Data Preparation
+Before training the RL model, the PCAP data obtained from M-Lab Speed tests needs to be preprocessed to extract relevant features for training. Currently, we are assuming that each pcap file represents an independent speed test which was executed. We assume this because the total time of the capture is typically of a single speed test and their is only 1 client and 1 server involved which further justifies are assumption. 
 
-1. **Problem Formulation**: Define the problem of test termination as a reinforcement learning problem, with the agent (RL model) learning when to terminate the speed test based on observed states and rewards.
+We have developed a script to fetch all the pcap files and extract the packet level data from the pcap file and cache it as a csv file. The idea behind saving it as a csv is that we just store the csv path in the `SpeedTestConnection` object. This allows us to load the csv only when it is required. 
 
-2. **RL Model Architecture**: Design the architecture of the RL model, including the state representation, action space (terminate or continue the test), and the reward function. Considerations will be made to balance the need for network quality information with minimizing data overhead.
+The code for this can be found in `ConnectionCSV.py` and `SpeedTestConnection.py`
 
-3. **Data Preparation**: Preprocess the PCAP data obtained from M-Lab Speed tests to extract relevant features for training the RL model. Features may include network throughput, latency, packet loss rates, and test duration.
+## RL Model Architecture
+The RL model architecture consists of the following architecture:
+### State Representation
+The state space represents the observed features of the speed test connection. We include a four-tuple of the following in the state:
+- Fraction of time elapsed
+- Fraction of data transferred
+- Current Upload Speed
+- Current Download Speed
+Let us consdier some design considertations for our state representation:
+#### Discretization of States
+The initial state space of the environment is a continous space. To make the system effecient to learn we have discretized the state space and divided each part of the state tuple into 10 bins. So effectively, each value is mapped to an integer between 0 to 9. The result of this discretization is that the state space reduces to tuples like (a, b, c, d). Where a, b, c, d are integers between 0 to 9. The idea behind chosing 10 bins was that it is easier to map a tuple to an integer. For example (1, 4, 5, 0) can be directly mapped to 1450 in the Q Table.
+### **Action Space**: 
+The action space consists of two actions: continue the test or terminate the test. The RL agent decides which action to take based on the current state and learned policies.
+### **Reward Function**: 
+The reward function provides feedback to the RL agent based on its actions. 
+We penalize the following: 
+- Fraction of Data Transferred
+- Fraction of Time Elapsed 
+- Absolute Difference between actual and current upload speed
+- Absolute Difference between actual and current download speed
 
-4. **Training**: Train the RL model using the prepared dataset. The model will learn optimal termination policies by exploring different termination decisions and observing their consequences in terms of rewards.
+Code for this part can be found in `QLearningAgent.py` and `SpeedTestEnvironment.py`
 
-5. **Evaluation**: Evaluate the trained RL model on separate validation datasets to assess its performance in terms of data savings achieved and information loss incurred. Metrics such as cumulative rewards, data usage, and network quality metrics will be used for evaluation.
+## Training
+Once the data preparation is complete, the RL model is trained using the prepared dataset. During training, the RL agent explores different termination decisions and observes their consequences in terms of rewards. Through this exploration and exploitation process, the RL agent learns optimal termination policies that balance the trade-off between collecting network quality information and minimizing data overhead.
 
-6. **Refinement**: Refine the termination strategy based on the evaluation results and feedback. Adjustments may include tweaking the reward function, exploring different state representations, or fine-tuning hyperparameters of the RL model.
+Code for this part can be found in `QLearningAgent.py` and `main.py`
 
-## Major Milestones and Timeline
-Here is our 8 week action plan for this project:
-1. **Problem Formulation and Model Design** (Week 1, 2):
-   - Define the problem statement and key metrics.
-   - Design the architecture of the RL model, including the state space, action space, and reward function.
-
-2. **Data Preparation** (Week 3):
-   - Preprocess the PCAP data to extract relevant features.
-   - Split the dataset into training and validation sets.
-
-3. **Model Implementation and Training** (Week 4, 5):
-   - Implement the RL algorithm for early termination.
-   - Train the RL model using the prepared dataset.
-   - Fine-tune the model based on initial training results.
-
-4. **Evaluation and Analysis** (Week 5, 6):
-   - Evaluate the trained model on validation datasets.
-   - Analyze the trade-off between data savings and information loss.
-   - Identify areas for improvement and refinement.
-
-5. **Refinement and Finalization** (Week 7, 8):
-   - Refine the termination strategy based on evaluation results.
-   - Finalize the solution and document the findings.
-   - Prepare the project report and presentation.
-
-
+## Next Steps:
+- train the model on larger datasets 
+- develop a testing framework
+- store the network metadata directly in SpeedTestConnection class so that it can be accessed easily 
+- Hyperparameter tuning on the reward function. Currently, we have assigned equal weights to all reward parameters. 
+- To develop a demo which simulates our early termination strategy on a packet capture. 
