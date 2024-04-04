@@ -29,6 +29,14 @@ class SpeedTestEnv(gym.Env):
         self.current_download_speed = 0
         self.current_upload_speed = 0
 
+        df_upload = self.df[self.df["Source IP"] == self.connection.client]
+
+        df_download = self.df[self.df["Destination IP"] == self.connection.client]
+
+        self.actual_upload_speed = df_upload['Payload Length'].sum() / (self.total_time - self.df_upload.iloc[0]['Timestamp'] + 1e-6)
+        self.actual_download_speed = df_download['Payload Length'].sum() / (self.total_time - self.df_download.iloc[0]['Timestamp'] + 1e-6)
+        
+
     def _discretize_state(self, observation):
         state_bins = []
         for i in range(len(observation)):
@@ -40,7 +48,7 @@ class SpeedTestEnv(gym.Env):
 
     def step(self, action):
         # Execute action
-        if action == 0:  # Terminate connection
+        if action == 0 or self.connection.is_empty():  # Terminate connection
             done = True
         else:  # Continue connection
             done = False
@@ -50,7 +58,7 @@ class SpeedTestEnv(gym.Env):
                 packet = self.df.iloc[self.current_index]
                 self.current_time = packet['Timestamp']
                 self.current_bytes_transferred += packet['Payload Length']
-                time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6) # offset for /0 error
+                time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp'])
                 self.current_download_speed = self.current_bytes_transferred / (self.total_bytes * time_elapsed)
 
                 if packet["Source IP"] == self.connection.client:
@@ -58,16 +66,26 @@ class SpeedTestEnv(gym.Env):
                 else:
                     self.download_bytes += packet['Payload Length']
                 
-                self.current_download_speed = (self.download_bytes/time_elapsed)/self.total_bytes # dividing by total bytes for normalization purposes
-                self.current_upload_speed_speed = (self.upload_bytes/time_elapsed)/self.total_bytes
-                
+                self.current_download_speed = (self.download_bytes/time_elapsed)
+                self.current_upload_speed_speed = (self.upload_bytes/time_elapsed)
+
+                download_speed_reward = abs(self.current_download_speed - self.actual_download_speed) 
+                upload_speed_reward = abs(self.current_upload_speed - self.actual_upload_speed) 
+
+                normalized_upload_reward = upload_speed_reward/(self.actual_upload_speed + 1e-6)
+                normalized_download_reward = download_speed_reward/(self.actual_download_speed + 1e-6)
+                normalized_time_reward = time_elapsed / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
+                normalized_data_reward = self.current_bytes_transferred/self.total_bytes
+
             else:
                 done = True
 
         # Calculate reward (example)
-        reward = -0.1  # Penalty for each step
+        reward = -0.01  # Penalty for each step
+        reward = -(normalized_download_reward + normalized_upload_reward + normalized_time_reward + normalized_data_reward)
         if done:
             reward += 1  # Reward for completing connection
+        
 
         # Get next state
         next_state = self._get_observation()
