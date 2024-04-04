@@ -2,6 +2,8 @@ import gym
 import numpy as np
 from constants import NUM_BINS
 
+import math
+
 # TODO: Resolve upload and download packets 
 class SpeedTestEnv(gym.Env):
     def __init__(self, connection, num_bins=NUM_BINS):
@@ -33,8 +35,8 @@ class SpeedTestEnv(gym.Env):
 
         df_download = self.df[self.df["Destination IP"] == self.connection.client]
 
-        self.actual_upload_speed = df_upload['Payload Length'].sum() / (self.total_time - self.df_upload.iloc[0]['Timestamp'] + 1e-6)
-        self.actual_download_speed = df_download['Payload Length'].sum() / (self.total_time - self.df_download.iloc[0]['Timestamp'] + 1e-6)
+        self.actual_upload_speed = df_upload['Payload Length'].sum() / (self.total_time - df_upload.iloc[0]['Timestamp'] + 1e-6)
+        self.actual_download_speed = df_download['Payload Length'].sum() / (self.total_time - df_download.iloc[0]['Timestamp'] + 1e-6)
         
 
     def _discretize_state(self, observation):
@@ -80,11 +82,13 @@ class SpeedTestEnv(gym.Env):
             else:
                 done = True
 
-        # Calculate reward (example)
-        reward = -0.01  # Penalty for each step
-        reward = -(normalized_download_reward + normalized_upload_reward + normalized_time_reward + normalized_data_reward)
+        # Calculate reward 
+        x = self.current_index/len(self.df)
+        reward =  100*math.log(-x + math.e)  # Penalty for each step, higher reward for exploration initially then the reward dies down exponentially
         if done:
             reward += 1  # Reward for completing connection
+        else:
+            reward = -(normalized_download_reward + normalized_upload_reward + normalized_time_reward + normalized_data_reward)
         
 
         # Get next state
@@ -105,10 +109,13 @@ class SpeedTestEnv(gym.Env):
     def _get_observation(self):
         # Calculate observation components
         bytes_transferred = self.current_bytes_transferred / self.total_bytes
-        time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'])
+        time_elapsed_normalized = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
 
         # Discretize observation
-        observation = [bytes_transferred, self.current_download_speed, self.current_upload_speed, time_elapsed]
+        download_state = min(self.current_download_speed/self.actual_download_speed, 0.99)
+        upload_state = min(self.current_upload_speed/self.actual_upload_speed, 0.99)
+        observation = [bytes_transferred, download_state ,upload_state , time_elapsed_normalized]
+
         discretized_observation = self._discretize_state(observation)
 
         return discretized_observation

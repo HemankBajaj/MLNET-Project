@@ -37,7 +37,7 @@ class QLearningAgent:
             self.state_index_map[state] = index
             index += 1
 
-        print("Q-table size:", self.q_table.shape[0])
+        print("Q-table size:", self.q_table.shape)
 
     def _enumerate_states(self):
         """Generate all possible states"""
