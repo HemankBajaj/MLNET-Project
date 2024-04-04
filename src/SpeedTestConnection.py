@@ -10,6 +10,10 @@ class SpeedTestConnection:
     """
     def __init__(self, csv_file):
         self.conn_csv = csv_file 
+        df = pd.read_csv(csv_file)
+        # verify if this is the client or the host. Current assumption is that this is a client
+        self.client = df.iloc[0]['Source IP'] 
+        self.setver = df.iloc[0]['Destination IP'] 
         
     def get_dataframe(self):
         return pd.read_csv(self.conn_csv)

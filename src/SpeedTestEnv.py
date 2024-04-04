@@ -8,8 +8,12 @@ class SpeedTestEnv(gym.Env):
         super(SpeedTestEnv, self).__init__()
         self.connection = connection
         self.df = self.connection.get_dataframe()
+
+        self.upload_bytes = 0
+        self.download_bytes = 0
+
         self.total_bytes = self.df['Payload Length'].sum()
-        self.total_time = self.df.iloc[-1]['Timestamp']
+        self.total_time = self.df.iloc[-1]['Timestamp']  #end time
         self.num_bins = num_bins
 
         # Define action space
@@ -46,9 +50,17 @@ class SpeedTestEnv(gym.Env):
                 packet = self.df.iloc[self.current_index]
                 self.current_time = packet['Timestamp']
                 self.current_bytes_transferred += packet['Payload Length']
-                time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'])
+                time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6) # offset for /0 error
                 self.current_download_speed = self.current_bytes_transferred / (self.total_bytes * time_elapsed)
-                self.current_upload_speed = self.current_download_speed  # Example, modify as per requirements
+
+                if packet["Source IP"] == self.connection.client:
+                    self.upload_bytes += packet['Payload Length']
+                else:
+                    self.download_bytes += packet['Payload Length']
+                
+                self.current_download_speed = (self.download_bytes/time_elapsed)/self.total_bytes # dividing by total bytes for normalization purposes
+                self.current_upload_speed_speed = (self.upload_bytes/time_elapsed)/self.total_bytes
+                
             else:
                 done = True
 
