@@ -92,13 +92,24 @@ def pcap_to_df(file_path):
     
     udp_fields_name = [f"udp_{x}" for x in udp_fields]
     tcp_fields_name = [f"tcp_{x}" for x in tcp_fields]
-    field_names = ['ts'] + ip_fields + udp_fields_name + tcp_fields_name
+    field_names = ['Timestamp'] + ip_fields + udp_fields_name + tcp_fields_name
     # Create a DataFrame from the list of fields
     df = pd.DataFrame(fields_list, columns=field_names)
-    print(df.head())
+    # print(df.head())
     return df
 
+def formatting_df(df):
+    print(df.columns)
+    df['Source IP'] = df['src_ip']
+    df['Destination IP'] = df['dst_ip']
+    df['Source Port'] = df['tcp_sport']
+    df['Destination Port'] = df['tcp_dport']
+    df['Payload Length'] = df['len']
 
+    df = df[['Timestamp', 'Source IP', 'Destination IP', 'Source Port', 'Destination Port', 'Payload Length']]
+    print(df.columns)
+    # ['Timestamp', 'Source IP', 'Destination IP',  'Source Port', 'Destination Port', 'Payload Length']
+    return df.dropna(how='any')
 
 
 
@@ -150,70 +161,71 @@ class ConnectionCSV:
             df = pd.DataFrame(fields_list, columns=['Timestamp', 'Source IP', 'Destination IP', 'Length', 'Protocol', 'Transport Protocol', 'Source Port', 'Destination Port', 'Payload Length', 'Checksum'])
             """
             df = pcap_to_df(pcap_file)
-            # def epoch_to_datetime_string(epoch_time):
-            #     dt_obj = datetime.fromtimestamp(int(epoch_time))            
-            #     datetime_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
-            #     return datetime_str
-            # # Time in readable format
-            # df['Time'] = df['Timestamp'].apply(epoch_to_datetime_string)
+            df = formatting_df(df)
+            def epoch_to_datetime_string(epoch_time):
+                dt_obj = datetime.fromtimestamp(int(epoch_time))            
+                datetime_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
+                return datetime_str
+            # Time in readable format
+            df['Time'] = df['Timestamp'].apply(epoch_to_datetime_string)
 
-            # # For now, assume that the df is sorted?
-            # # df = df.sort_values(by='Time')
+            # For now, assume that the df is sorted?
+            # df = df.sort_values(by='Time')
             
 
             
-            # # Check if group has at least 20 packets and time difference is at least 9.9 seconds
-            # if len(df) < 20 or df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'] < 9.9:
-            #     return 
-            # print(df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'])
-            # client_ip = df.iloc[0]['Source IP']
-            # server_ip = df.iloc[0]['Destination IP']
+            # Check if group has at least 20 packets and time difference is at least 9.9 seconds
+            if len(df) < 20 or df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'] < 9.9:
+                return 
+            print(df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'])
+            client_ip = df.iloc[0]['Source IP']
+            server_ip = df.iloc[0]['Destination IP']
 
-            # n_groups = 20
-            # group_size = len(df) // n_groups
-            # group_dfs = [df.iloc[i:min(i+group_size, len(df))] for i in range(0, len(df), group_size)]
+            n_groups = 20
+            group_size = len(df) // n_groups
+            group_dfs = [df.iloc[i:min(i+group_size, len(df))] for i in range(0, len(df), group_size)]
 
-            # cumulative_time = 0
-            # dict_grp = {
-            #         'Total Time': [],
-            #         'Upload Bytes': [],
-            #         'Download Bytes': [],
-            #         'Cumulative Time': []
-            # }
+            cumulative_time = 0
+            dict_grp = {
+                    'Total Time': [],
+                    'Upload Bytes': [],
+                    'Download Bytes': [],
+                    'Cumulative Time': []
+            }
             
-            # for group_df in group_dfs:
-            #     # Calculate total time for the group
-            #     total_time = group_df.iloc[-1]['Timestamp'] - group_df.iloc[0]['Timestamp']
+            for group_df in group_dfs:
+                # Calculate total time for the group
+                total_time = group_df.iloc[-1]['Timestamp'] - group_df.iloc[0]['Timestamp']
 
-            #     # Calculate upload bytes
-            #     upload_bytes = group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Length'].sum()
+                # Calculate upload bytes
+                upload_bytes = group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Payload Length'].sum()
 
-            #     # Calculate download bytes
-            #     download_bytes = group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Length'].sum()
+                # Calculate download bytes
+                download_bytes = group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Payload Length'].sum()
 
-            #     # Update cumulative time
-            #     cumulative_time += total_time
-            #     print(total_time, type(total_time))
-            #     # Append results
-            #     dict_grp["Total Time"].append(float(total_time))
-            #     dict_grp["Upload Bytes"].append(float(upload_bytes))
-            #     dict_grp["Download Bytes"].append(float(download_bytes))
-            #     dict_grp["Cumulative Time"].append(float(cumulative_time))
+                # Update cumulative time
+                cumulative_time += total_time
+                print(total_time, type(total_time))
+                # Append results
+                dict_grp["Total Time"].append(float(total_time))
+                dict_grp["Upload Bytes"].append(float(upload_bytes))
+                dict_grp["Download Bytes"].append(float(download_bytes))
+                dict_grp["Cumulative Time"].append(float(cumulative_time))
 
-            # df_conn = pd.DataFrame(dict_grp)
+            df_conn = pd.DataFrame(dict_grp)
 
-            # directory = "cached_csv"
+            directory = "cached_csv"
             
-            # # Check if the directory exists, if not, create it
-            # if not os.path.exists(directory):
-            #     os.makedirs(directory)
+            # Check if the directory exists, if not, create it
+            if not os.path.exists(directory):
+                os.makedirs(directory)
             
-            # # save the CSV file into the directory
-            # file_name = os.path.basename(pcap_file)
-            # file_name = os.path.splitext(file_name)[0] # remove .gz
-            # file_name = os.path.splitext(file_name)[0] # remove .pcap
-            # csv_path = os.path.join(directory, file_name + ".csv")
-            # df_conn.to_csv(csv_path, index=False)
+            # save the CSV file into the directory
+            file_name = os.path.basename(pcap_file)
+            file_name = os.path.splitext(file_name)[0] # remove .gz
+            file_name = os.path.splitext(file_name)[0] # remove .pcap
+            csv_path = os.path.join(directory, file_name + ".csv")
+            df_conn.to_csv(csv_path, index=False)
 
         cache_dataframe(pcap_file)
 
