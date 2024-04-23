@@ -1,5 +1,4 @@
 # Early Termination Strategy for Speed Test
-# Progress Report
 
 ```
 Hemank Bajaj, 2020CS10349
@@ -7,6 +6,8 @@ Dhruv Tyagi, 2020CS10341
 ```
 
 Github Link : [https://github.com/HemankBajaj/MLNET-Project](https://github.com/HemankBajaj/MLNET-Project)
+
+## Problem Statement
 
 
 ## Problem Formulation
@@ -21,7 +22,7 @@ The code for this can be found in `ConnectionCSV.py` and `SpeedTestConnection.py
 
 ## RL Model Architecture
 The RL model architecture consists of the following architecture:
-### State Representation
+### State Representation 
 The state space represents the observed features of the speed test connection. We include a four-tuple of the following in the state:
 - Fraction of time elapsed
 - Fraction of data transferred
@@ -42,14 +43,15 @@ We penalize the following:
 
 Code for this part can be found in `QLearningAgent.py` and `SpeedTestEnvironment.py`
 
-## Training
+## Training Architecture
 Once the data preparation is complete, the RL model is trained using the prepared dataset. During training, the RL agent explores different termination decisions and observes their consequences in terms of rewards. Through this exploration and exploitation process, the RL agent learns optimal termination policies that balance the trade-off between collecting network quality information and minimizing data overhead.
 
 Code for this part can be found in `QLearningAgent.py` and `main.py`
 
-## Next Steps:
-- train the model on larger datasets 
-- develop a testing framework
-- store the network metadata directly in SpeedTestConnection class so that it can be accessed easily 
-- Hyperparameter tuning on the reward function. Currently, we have assigned equal weights to all reward parameters. 
-- To develop a demo which simulates our early termination strategy on a packet capture. 
+
+## Inference Architecture 
+
+
+## Future Scope
+- Training On a Larger Dataset. Multiple workers deployed for updating different sections of the Q-Table. 
+- Right now, we have an offline learning of the Q-Table. This can be extended to update the Q-Table online. This has several advantages for example, we need not train the Q-Table with extensive network conditions. Each deployment learns according to the traffic it encounters. 
