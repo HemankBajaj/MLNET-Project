@@ -49,6 +49,48 @@ class ConnectionCSV:
 
             # For now, assume that the df is sorted?
             # df = df.sort_values(by='Time')
+            
+
+            
+            # Check if group has at least 20 packets and time difference is at least 9.9 seconds
+            if len(df) < 20 or df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'] < 9.9:
+                return 
+            print(df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'])
+            client_ip = df.iloc[0]['Source IP']
+            server_ip = df.iloc[0]['Destination IP']
+
+            n_groups = 20
+            group_size = len(df) // n_groups
+            group_dfs = [df.iloc[i:min(i+group_size, len(df))] for i in range(0, len(df), group_size)]
+
+            cumulative_time = 0
+            dict_grp = {
+                    'Total Time': [],
+                    'Upload Bytes': [],
+                    'Download Bytes': [],
+                    'Cumulative Time': []
+            }
+            
+            for group_df in group_dfs:
+                # Calculate total time for the group
+                total_time = group_df.iloc[-1]['Timestamp'] - group_df.iloc[0]['Timestamp']
+
+                # Calculate upload bytes
+                upload_bytes = group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Length'].sum()
+
+                # Calculate download bytes
+                download_bytes = group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Length'].sum()
+
+                # Update cumulative time
+                cumulative_time += total_time
+                print(total_time, type(total_time))
+                # Append results
+                dict_grp["Total Time"].append(float(total_time))
+                dict_grp["Upload Bytes"].append(float(upload_bytes))
+                dict_grp["Download Bytes"].append(float(download_bytes))
+                dict_grp["Cumulative Time"].append(float(cumulative_time))
+
+            df_conn = pd.DataFrame(dict_grp)
 
             directory = "cached_csv"
             
@@ -61,9 +103,10 @@ class ConnectionCSV:
             file_name = os.path.splitext(file_name)[0] # remove .gz
             file_name = os.path.splitext(file_name)[0] # remove .pcap
             csv_path = os.path.join(directory, file_name + ".csv")
-            df.to_csv(csv_path, index=False)
+            df_conn.to_csv(csv_path, index=False)
 
         cache_dataframe(pcap_file)
+
 
 
 if __name__ == "__main__":
@@ -73,10 +116,5 @@ if __name__ == "__main__":
     # caching the first 10 pcap files
     for i in range(10):
         conn = ConnectionCSV(pcap_list[i])
+        print("OK")
     print("Cached Connection CSVs")
-
-        
-        
-        
-        
-        

@@ -5,7 +5,8 @@ from constants import (
     DISCOUNT_FACTOR,
     EPS, 
     EPS_DECAY, 
-    EPS_MIN
+    EPS_MIN, 
+    STATE_SIZE
 )
 
 import numpy as np
@@ -26,7 +27,7 @@ class QLearningAgent:
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = epsilon_min
-        self.q_table = np.zeros((10000, env.action_space.n)) # HARDCODING for now
+        self.q_table = np.zeros((STATE_SIZE, env.action_space.n)) # HARDCODING for now
         self.state_index_map = {}  # Dictionary to map state tuples to indices
 
         # Populate state index map
@@ -57,7 +58,9 @@ class QLearningAgent:
         if random.uniform(0, 1) < self.epsilon:
             return self.env.action_space.sample()  # Explore action space
         else:
-            return np.argmax(self.q_table[self.state_index_map[state]])  # Exploit learned values
+            if np.max(self.q_table[self.state_index_map[state]]) != 0:
+                return np.argmax(self.q_table[self.state_index_map[state]])  # Exploit learned values only if it is non-zero
+            return self.env.action_space.sample()
 
     def update_q_table(self, state, action, reward, next_state, done):
         state_index = self.state_index_map[state]
@@ -76,6 +79,7 @@ class QLearningAgent:
             target = reward
 
         # Update Q-value for current state-action pair
+        
         self.q_table[state_index, action] += self.learning_rate * (target - self.q_table[state_index, action])
 
     def decay_epsilon(self):

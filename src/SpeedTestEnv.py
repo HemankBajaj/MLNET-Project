@@ -1,14 +1,14 @@
 import gym
 import numpy as np
-from constants import NUM_BINS
+from constants import NUM_BINS_LIST
 
 import math
 
 # TODO: Resolve upload and download packets 
 class SpeedTestEnv(gym.Env):
-    def __init__(self, connection, num_bins=NUM_BINS):
+    def __init__(self, connection, num_bins_list=NUM_BINS_LIST):
         super(SpeedTestEnv, self).__init__()
-        self.connection = connection
+        self.connection = connection        
         self.df = self.connection.get_dataframe()
 
         self.upload_bytes = 0
@@ -16,13 +16,13 @@ class SpeedTestEnv(gym.Env):
 
         self.total_bytes = self.df['Payload Length'].sum()
         self.total_time = self.df.iloc[-1]['Timestamp']  #end time
-        self.num_bins = num_bins
+        self.num_bins_list = num_bins_list
 
         # Define action space
         self.action_space = gym.spaces.Discrete(2)  # 0: Terminate connection, 1: Continue
 
         # Discretize continuous state space
-        self.observation_space = gym.spaces.MultiDiscrete([num_bins] * 4)  # Four components, each with num_bins
+        self.observation_space = gym.spaces.MultiDiscrete(NUM_BINS_LIST)  # Four components, each with num_bins
 
         # Initialize state variables
         self.current_index = 0
@@ -43,7 +43,7 @@ class SpeedTestEnv(gym.Env):
         state_bins = []
         for i in range(len(observation)):
             value = observation[i]
-            bin_width = 1.0 / self.num_bins
+            bin_width = 1.0 / self.num_bins_list[i]
             bin_index = int(value / bin_width)
             state_bins.append(bin_index)
         return tuple(state_bins)
@@ -79,6 +79,8 @@ class SpeedTestEnv(gym.Env):
                 normalized_time_reward = time_elapsed / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
                 normalized_data_reward = self.current_bytes_transferred/self.total_bytes
 
+                print(self.total_time)
+
             else:
                 done = True
 
@@ -93,6 +95,7 @@ class SpeedTestEnv(gym.Env):
 
         # Get next state
         next_state = self._get_observation()
+        # print("NEXT STATE -> ", next_state)
 
         return next_state, reward, done, {}
 
@@ -106,16 +109,17 @@ class SpeedTestEnv(gym.Env):
 
         return self._get_observation()
 
+    # TODO : Define a decent approach for discretization
+    # For time we can define 1-e^(-kt) , will allow for more states filled for starting packets
     def _get_observation(self):
         # Calculate observation components
         bytes_transferred = self.current_bytes_transferred / self.total_bytes
         time_elapsed_normalized = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
-
         # Discretize observation
         download_state = min(self.current_download_speed/self.actual_download_speed, 0.99)
         upload_state = min(self.current_upload_speed/self.actual_upload_speed, 0.99)
-        observation = [bytes_transferred, download_state ,upload_state , time_elapsed_normalized]
-
+        observation = [min(bytes_transferred*1000, 0.99), download_state ,upload_state , min(time_elapsed_normalized*1000, 0.99)]
+        # print(observation, (self.current_time - self.df.iloc[0]['Timestamp']), self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
         discretized_observation = self._discretize_state(observation)
 
         return discretized_observation
