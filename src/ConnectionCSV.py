@@ -76,10 +76,10 @@ class ConnectionCSV:
                 total_time = group_df.iloc[-1]['Timestamp'] - group_df.iloc[0]['Timestamp']
 
                 # Calculate upload bytes
-                upload_bytes = group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Length'].sum()
+                upload_bytes = group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Payload Length'].sum()
 
                 # Calculate download bytes
-                download_bytes = group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Length'].sum()
+                download_bytes = group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Payload Length'].sum()
 
                 # Update cumulative time
                 cumulative_time += total_time

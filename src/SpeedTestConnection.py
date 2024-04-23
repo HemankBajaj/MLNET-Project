@@ -15,8 +15,6 @@ class SpeedTestConnection:
         # verify if this is the client or the host. Current assumption is that this is a client
         if len(df) > 0:
             self.df_empty = False
-            self.client = df.iloc[0]['Source IP'] 
-            self.setver = df.iloc[0]['Destination IP'] 
         
     def get_dataframe(self):
         return pd.read_csv(self.conn_csv)

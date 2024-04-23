@@ -4,6 +4,31 @@ from constants import NUM_BINS_LIST
 
 import math
 
+
+
+"""
+FeatureList : 
+    - Relative Change in Absolute Throughput 1 (using tanh for normalization)  (Range 0-1)
+    - Relative Change in Absolute Throughput 2 (using tanh for normalization)  (Range 0-1)
+    - Relative Change in Absolute Throughput 3 (using tanh for normalization)  (Range 0-1)
+    - Relative Absolute Error in Upload Speed and Download Speed (mean squared error) (Range 0-1)
+    - Fraction of total time elapsed
+
+    5 tuple represent a state -> Deci Descretization of each state element -> 10^5 total states 
+
+Reward Function: 
+    Reward =  -1*(Std Deviation in Relative changes  + MSE) , the idea is that throughput does not changes much and the error in upload and download speeds is minimal
+"""
+
+
+"""
+Schema of Processed Data : 
+    - Total Time
+    - Upload Bytes
+    - Download Bytes
+    - Cumulative Time
+"""
+
 # TODO: Resolve upload and download packets 
 class SpeedTestEnv(gym.Env):
     def __init__(self, connection, num_bins_list=NUM_BINS_LIST):
@@ -11,33 +36,30 @@ class SpeedTestEnv(gym.Env):
         self.connection = connection        
         self.df = self.connection.get_dataframe()
 
-        self.upload_bytes = 0
-        self.download_bytes = 0
+        self.total_upload_bytes = self.df["Upload Bytes"].sum()
+        self.total_download_bytes = self.df["Download Bytes"].sum()
+        self.total_time = self.df["Cumulative Time"]
 
-        self.total_bytes = self.df['Payload Length'].sum()
-        self.total_time = self.df.iloc[-1]['Timestamp']  #end time
+        self.actual_upload_speed = self.total_upload_bytes/self.total_time
+        self.actual_download_speed = self.total_download_bytes/self.total_time
+
+        # Environment Specifications, defining action space and distrectization of continous state space 
         self.num_bins_list = num_bins_list
-
-        # Define action space
         self.action_space = gym.spaces.Discrete(2)  # 0: Terminate connection, 1: Continue
-
-        # Discretize continuous state space
-        self.observation_space = gym.spaces.MultiDiscrete(NUM_BINS_LIST)  # Four components, each with num_bins
+        self.observation_space = gym.spaces.MultiDiscrete(NUM_BINS_LIST)  # 6 components, each with num_bins
 
         # Initialize state variables
-        self.current_index = 0
-        self.current_time = self.df.iloc[self.current_index]['Timestamp']
-        self.current_bytes_transferred = 0
+        self.upload_bytes = 0
+        self.download_bytes = 0
+        self.current_index = -1
+        self.current_time = 0
+        
+
+        # features 
         self.current_download_speed = 0
         self.current_upload_speed = 0
-
-        df_upload = self.df[self.df["Source IP"] == self.connection.client]
-
-        df_download = self.df[self.df["Destination IP"] == self.connection.client]
-
-        self.actual_upload_speed = df_upload['Payload Length'].sum() / (self.total_time - df_upload.iloc[0]['Timestamp'] + 1e-6)
-        self.actual_download_speed = df_download['Payload Length'].sum() / (self.total_time - df_download.iloc[0]['Timestamp'] + 1e-6)
-        
+        self.throughPutQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs, adding dummy values for now (keeping std deviation super high for dummy)
+        self.prevThroughPut = None  # previous throughput to update the differences
 
     def _discretize_state(self, observation):
         state_bins = []
@@ -57,29 +79,53 @@ class SpeedTestEnv(gym.Env):
             # Process next packet
             self.current_index += 1
             if self.current_index < len(self.df):
-                packet = self.df.iloc[self.current_index]
-                self.current_time = packet['Timestamp']
-                self.current_bytes_transferred += packet['Payload Length']
-                time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp'])
-                self.current_download_speed = self.current_bytes_transferred / (self.total_bytes * time_elapsed)
+                packet_group = self.df.iloc[self.current_index]
+                self.current_time = packet_group["Cumulative Time"]
+                self.upload_bytes += packet_group["Upload Bytes"]
+                self.download_bytes += packet_group["Download Bytes"]
+                self.current_bytes_transferred = self.upload_bytes + self.download_bytes
+                self.current_download_speed = self.download_bytes / (self.current_time + 1e-6)
+                self.current_upload_speed = self.upload_bytes / (self.current_time + 1e-6)
 
-                if packet["Source IP"] == self.connection.client:
-                    self.upload_bytes += packet['Payload Length']
-                else:
-                    self.download_bytes += packet['Payload Length']
+                self.current_throughPut = self.current_bytes_transferred/(self.current_time + 1e-6)
+
+
+                # Update ThroughPutQueue
+                if self.prevThroughPut != None:
+                    throughputChange = abs(self.current_throughPut - self.prevThroughPut)
+                    throughput_proxy = math.tanh(throughputChange/self.current_throughPut)
+                    self.throughPutQueue.append(throughput_proxy)
+                    self.throughPutQueue.pop(0)
+                self.prevThroughPut = self.current_throughPut
+
+
+            
+
+
+                # # self.current_time = 
+                # packet = self.df.iloc[self.current_index]
+                # self.current_time = packet['Timestamp']
+                # self.current_bytes_transferred += packet['Payload Length']
+                # time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp'])
+                # self.current_download_speed = self.current_bytes_transferred / (self.total_bytes * time_elapsed)
+
+                # if packet["Source IP"] == self.connection.client:
+                #     self.upload_bytes += packet['Payload Length']
+                # else:
+                #     self.download_bytes += packet['Payload Length']
                 
-                self.current_download_speed = (self.download_bytes/time_elapsed)
-                self.current_upload_speed_speed = (self.upload_bytes/time_elapsed)
+                # self.current_download_speed = (self.download_bytes/time_elapsed)
+                # self.current_upload_speed_speed = (self.upload_bytes/time_elapsed)
 
-                download_speed_reward = abs(self.current_download_speed - self.actual_download_speed) 
-                upload_speed_reward = abs(self.current_upload_speed - self.actual_upload_speed) 
+                # download_speed_reward = abs(self.current_download_speed - self.actual_download_speed) 
+                # upload_speed_reward = abs(self.current_upload_speed - self.actual_upload_speed) 
 
-                normalized_upload_reward = upload_speed_reward/(self.actual_upload_speed + 1e-6)
-                normalized_download_reward = download_speed_reward/(self.actual_download_speed + 1e-6)
-                normalized_time_reward = time_elapsed / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
-                normalized_data_reward = self.current_bytes_transferred/self.total_bytes
+                # normalized_upload_reward = upload_speed_reward/(self.actual_upload_speed + 1e-6)
+                # normalized_download_reward = download_speed_reward/(self.actual_download_speed + 1e-6)
+                # normalized_time_reward = time_elapsed / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
+                # normalized_data_reward = self.current_bytes_transferred/self.total_bytes
 
-                print(self.total_time)
+                # print(self.total_time)
 
             else:
                 done = True
@@ -109,17 +155,20 @@ class SpeedTestEnv(gym.Env):
 
         return self._get_observation()
 
-    # TODO : Define a decent approach for discretization
-    # For time we can define 1-e^(-kt) , will allow for more states filled for starting packets
     def _get_observation(self):
         # Calculate observation components
-        bytes_transferred = self.current_bytes_transferred / self.total_bytes
-        time_elapsed_normalized = (self.current_time - self.df.iloc[0]['Timestamp']) / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
+        tr1 = self.throughPutQueue[0]
+        tr2 = self.throughPutQueue[1]
+        tr3 = self.throughPutQueue[2]
+        fraction = self.current_time/self.total_time # fraction of time elapsed 
+
+        error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
+        error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
+
+        mean_squared_error = math.sqrt((math.pow(error_download, 2) + math.pow(error_upload, 2))/2)
+
         # Discretize observation
-        download_state = min(self.current_download_speed/self.actual_download_speed, 0.99)
-        upload_state = min(self.current_upload_speed/self.actual_upload_speed, 0.99)
-        observation = [min(bytes_transferred*1000, 0.99), download_state ,upload_state , min(time_elapsed_normalized*1000, 0.99)]
-        # print(observation, (self.current_time - self.df.iloc[0]['Timestamp']), self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
+        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99), min(fraction, 0.99), min(mean_squared_error, 0.99)]
         discretized_observation = self._discretize_state(observation)
 
         return discretized_observation
