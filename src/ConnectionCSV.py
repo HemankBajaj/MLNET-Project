@@ -1,8 +1,128 @@
-from scapy.all import rdpcap
+from scapy.all import *
+import dpkt
+import gzip
+
 import pandas as pd           
 import numpy as np             
 from datetime import datetime
 import os 
+
+# Define lists for IP, TCP, and UDP fields
+ip_fields = ['src_ip', 'dst_ip', 'len', 'proto']
+tcp_fields = ['sport', 'dport', 'seq', 'ack', 'off', 'flags', 'win', 'sum', 'urp', 'opts', "ulen"]
+udp_fields = ['sport', 'dport', 'ulen', 'sum']
+
+# Function to extract IPv4 fields from data
+def get_ip4_fields(data):
+    src = socket.inet_ntoa(data.src)
+    dst = socket.inet_ntoa(data.dst)
+    plen = data.len
+    proto = data.p
+    return [src, dst, plen, proto]
+
+# Function to extract IPv6 fields from data
+def get_ip6_fields(data):
+    src = socket.inet_ntop(socket.AF_INET6, data.src)
+    dst = socket.inet_ntop(socket.AF_INET6, data.dst)
+    plen = data.plen
+    proto = data.p
+    return [src, dst, plen, proto]
+
+# Function to extract TCP fields
+def get_tcp_fields(tcp):
+    fields = []
+    for field in tcp_fields:
+        if field == "ulen":
+            fields.append(len(tcp.data))
+        else:
+            fields.append(getattr(tcp, field))
+    return fields
+
+# Function to extract UDP fields
+def get_udp_fields(udp):
+    fields = []
+    for field in udp_fields:
+        fields.append(getattr(udp, field))
+    return fields
+
+# Function to convert pcap file to DataFrame
+def pcap_to_df(file_path):
+    # Open the pcap file
+    f = open(file_path, 'rb')
+    # with gzip.open(file_path, 'rb') as fi:
+        # f = fi.read()
+    # Create a pcap reader
+    pcap = dpkt.pcap.Reader(f)
+    # List to store extracted fields
+    fields_list = []
+    # Iterate through each packet in the pcap file
+    for ts, buf in pcap:
+        
+        fields = [ts]
+        # Parse the Ethernet frame
+        eth = dpkt.ethernet.Ethernet(buf)
+        # Get the IP packet
+        ip = eth.data
+        ip_type = "ipv4"
+        
+        
+        # Check if it is an IPv4 or IPv6 packet
+        if isinstance(ip, dpkt.ip.IP):
+            fields += get_ip4_fields(ip)
+        elif isinstance(ip, dpkt.ip6.IP6):
+            fields += get_ip6_fields(ip)
+            ip_type = "ipv6"
+        else:
+            continue
+            
+        # Create dummy lists for TCP and UDP fields
+        dummy_tcp_fields = [None for x in tcp_fields]
+        dummy_udp_fields = [None for x in udp_fields]
+        # Check the transport protocol and extract fields accordingly
+        if fields[-1] == 17:  # UDP
+            transport_fields = get_udp_fields(ip.data) + dummy_tcp_fields
+        elif fields[-1] == 6:  # TCP
+            transport_fields = dummy_udp_fields + get_tcp_fields(ip.data)
+        else:
+            continue
+        
+        # Combine IP, UDP, and TCP fields
+        fields += transport_fields
+        fields_list.append(fields)
+    
+    udp_fields_name = [f"udp_{x}" for x in udp_fields]
+    tcp_fields_name = [f"tcp_{x}" for x in tcp_fields]
+    field_names = ['Timestamp'] + ip_fields + udp_fields_name + tcp_fields_name
+    # Create a DataFrame from the list of fields
+    df = pd.DataFrame(fields_list, columns=field_names)
+    # print(df.head())
+    return df
+
+def formatting_df(df):
+    print(df.columns)
+    df['Source IP'] = df['src_ip']
+    df['Destination IP'] = df['dst_ip']
+    df['Source Port'] = df['tcp_sport']
+    df['Destination Port'] = df['tcp_dport']
+    df['Payload Length'] = df['len']
+
+    df = df[['Timestamp', 'Source IP', 'Destination IP', 'Source Port', 'Destination Port', 'Payload Length']]
+    print(df.columns)
+    # ['Timestamp', 'Source IP', 'Destination IP',  'Source Port', 'Destination Port', 'Payload Length']
+    return df.dropna(how='any')
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def readPCAP(directory):   
     """
@@ -12,7 +132,7 @@ def readPCAP(directory):
         pcap_files = []
         for root, dirs, files in os.walk(folder):
             for file in files:
-                if file.endswith(".pcap.gz"):
+                if file.endswith(".pcap"):
                     pcap_files.append(os.path.join(root, file))
         return pcap_files
 
@@ -25,7 +145,7 @@ class ConnectionCSV:
         def cache_dataframe(pcap_file):
             """
             Assumes TCP packets only
-            """
+        
             packets = rdpcap(pcap_file)
             # Extract fields from each packet
             fields_list = []
@@ -39,7 +159,9 @@ class ConnectionCSV:
             
             # Create DataFrame
             df = pd.DataFrame(fields_list, columns=['Timestamp', 'Source IP', 'Destination IP', 'Length', 'Protocol', 'Transport Protocol', 'Source Port', 'Destination Port', 'Payload Length', 'Checksum'])
-    
+            """
+            df = pcap_to_df(pcap_file)
+            df = formatting_df(df)
             def epoch_to_datetime_string(epoch_time):
                 dt_obj = datetime.fromtimestamp(int(epoch_time))            
                 datetime_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
