@@ -11,13 +11,14 @@ FeatureList :
     - Relative Change in Absolute Throughput 1 (using tanh for normalization)  (Range 0-1)
     - Relative Change in Absolute Throughput 2 (using tanh for normalization)  (Range 0-1)
     - Relative Change in Absolute Throughput 3 (using tanh for normalization)  (Range 0-1)
-    - Relative Absolute Error in Upload Speed and Download Speed (mean squared error) (Range 0-1)
-    - Fraction of total time elapsed
+    - Relative Change in Absolute RTT 1 (using tanh for normalization)  (Range 0-1)
+    - Relative Change in Absolute RTT 2 (using tanh for normalization)  (Range 0-1)
+    - Relative Change in Absolute RTT 3 (using tanh for normalization)  (Range 0-1)
 
-    5 tuple represent a state -> Deci Descretization of each state element -> 10^5 total states 
+    6 tuple represent a state -> Deci Descretization of each state element -> 10^6 total states 
 
 Reward Function: 
-    Reward =  -1*(Std Deviation in Relative changes  + MSE) , the idea is that throughput does not changes much and the error in upload and download speeds is minimal
+    Reward =  -1*(Std Deviation in Relative changes + Std Dev in RTT + Error) , the idea is that throughput does not changes much and the error in upload and download speeds is minimal
 """
 
 
@@ -29,6 +30,21 @@ Schema of Processed Data :
     - Cumulative Time
 """
 
+def weighted_average(values):
+    n = len(values)
+    # weights = list(range(1, n + 1))  # Generate weights from 1 to n
+    weights = [i for i in range(1, n+1)]
+    total_weighted_sum = sum(value * weight for value, weight in zip(values, weights))
+    total_weight = sum(weights)
+    return total_weighted_sum / total_weight if total_weight != 0 else 0
+
+def capValue(x):
+    if x < 0:
+        return 0
+    elif x > 1:
+        return 1
+    return x 
+
 # TODO: Resolve upload and download packets 
 class SpeedTestEnv(gym.Env):
     def __init__(self, connection, num_bins_list=NUM_BINS_LIST):
@@ -38,7 +54,7 @@ class SpeedTestEnv(gym.Env):
 
         self.total_upload_bytes = self.df["Upload Bytes"].sum()
         self.total_download_bytes = self.df["Download Bytes"].sum()
-        self.total_time = self.df["Cumulative Time"]
+        self.total_time = self.df["Cumulative Time"].iloc[-1]
 
         self.actual_upload_speed = self.total_upload_bytes/self.total_time
         self.actual_download_speed = self.total_download_bytes/self.total_time
@@ -59,7 +75,9 @@ class SpeedTestEnv(gym.Env):
         self.current_download_speed = 0
         self.current_upload_speed = 0
         self.throughPutQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs, adding dummy values for now (keeping std deviation super high for dummy)
+        self.rttQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs
         self.prevThroughPut = None  # previous throughput to update the differences
+        self.prevRTT = None
 
     def _discretize_state(self, observation):
         state_bins = []
@@ -89,8 +107,16 @@ class SpeedTestEnv(gym.Env):
 
                 self.current_throughPut = self.current_bytes_transferred/(self.current_time + 1e-6)
 
+                currentRTT = packet_group["Average RTT"]
 
-                # Update ThroughPutQueue
+                # Update rttQueue, ThroughPutQueue
+                if self.prevRTT != None:
+                    rttChange = abs(currentRTT - self.prevRTT)
+                    rtt_proxy = math.tanh(rttChange/currentRTT)
+                    self.rttQueue.append(rtt_proxy)
+                    self.rttQueue.pop(0)
+                self.prevRTT = currentRTT
+
                 if self.prevThroughPut != None:
                     throughputChange = abs(self.current_throughPut - self.prevThroughPut)
                     throughput_proxy = math.tanh(throughputChange/self.current_throughPut)
@@ -99,56 +125,38 @@ class SpeedTestEnv(gym.Env):
                 self.prevThroughPut = self.current_throughPut
 
 
-            
+                rtt_reward = weighted_average(self.rttQueue)
+                throughput_reward = weighted_average(self.throughPutQueue)
+                error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
+                error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
 
-
-                # # self.current_time = 
-                # packet = self.df.iloc[self.current_index]
-                # self.current_time = packet['Timestamp']
-                # self.current_bytes_transferred += packet['Payload Length']
-                # time_elapsed = (self.current_time - self.df.iloc[0]['Timestamp'])
-                # self.current_download_speed = self.current_bytes_transferred / (self.total_bytes * time_elapsed)
-
-                # if packet["Source IP"] == self.connection.client:
-                #     self.upload_bytes += packet['Payload Length']
-                # else:
-                #     self.download_bytes += packet['Payload Length']
+                error_download_reward = math.tanh(error_download)
+                error_upload_reward = math.tanh(error_upload)
                 
-                # self.current_download_speed = (self.download_bytes/time_elapsed)
-                # self.current_upload_speed_speed = (self.upload_bytes/time_elapsed)
-
-                # download_speed_reward = abs(self.current_download_speed - self.actual_download_speed) 
-                # upload_speed_reward = abs(self.current_upload_speed - self.actual_upload_speed) 
-
-                # normalized_upload_reward = upload_speed_reward/(self.actual_upload_speed + 1e-6)
-                # normalized_download_reward = download_speed_reward/(self.actual_download_speed + 1e-6)
-                # normalized_time_reward = time_elapsed / (self.total_time - self.df.iloc[0]['Timestamp'] + 1e-6)
-                # normalized_data_reward = self.current_bytes_transferred/self.total_bytes
-
-                # print(self.total_time)
-
             else:
                 done = True
 
         # Calculate reward 
         x = self.current_index/len(self.df)
-        reward =  100*math.log(-x + math.e)  # Penalty for each step, higher reward for exploration initially then the reward dies down exponentially
-        if done:
-            reward += 1  # Reward for completing connection
+        reward = 0
+        # reward =  100*math.log(-x + math.e)  # Penalty for each step, higher reward for exploration initially then the reward dies down exponentially
+        if max(self.rttQueue) == 9 or max(self.throughPutQueue) == 9: # no reward if just started state
+            reward += -10
+        elif done:
+            reward += 2  # Reward for completing connection
         else:
-            reward = -(normalized_download_reward + normalized_upload_reward + normalized_time_reward + normalized_data_reward)
+            reward = 1 -(2*capValue(rtt_reward) + 5*capValue(throughput_reward) + 5*error_download_reward + 5*error_upload_reward)/(2 + 5 + 5 + 5)
         
 
         # Get next state
         next_state = self._get_observation()
         # print("NEXT STATE -> ", next_state)
-
         return next_state, reward, done, {}
 
     def reset(self):
         # Reset environment
         self.current_index = 0
-        self.current_time = self.df.iloc[self.current_index]['Timestamp']
+        self.current_time = 0
         self.current_bytes_transferred = 0
         self.current_download_speed = 0
         self.current_upload_speed = 0
@@ -160,15 +168,16 @@ class SpeedTestEnv(gym.Env):
         tr1 = self.throughPutQueue[0]
         tr2 = self.throughPutQueue[1]
         tr3 = self.throughPutQueue[2]
-        fraction = self.current_time/self.total_time # fraction of time elapsed 
+        rtt1 = self.rttQueue[0]
+        rtt2 = self.rttQueue[1]
+        rtt3 = self.rttQueue[2]
+        # error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
+        # error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
 
-        error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
-        error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
-
-        mean_squared_error = math.sqrt((math.pow(error_download, 2) + math.pow(error_upload, 2))/2)
+        # mean_squared_error = math.sqrt((math.pow(error_download, 2) + math.pow(error_upload, 2))/2)
 
         # Discretize observation
-        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99), min(fraction, 0.99), min(mean_squared_error, 0.99)]
+        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99), min(rtt1, 0.99), min(rtt2, 0.99), min(rtt3, 0.99)]
         discretized_observation = self._discretize_state(observation)
 
         return discretized_observation

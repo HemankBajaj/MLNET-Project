@@ -1,6 +1,6 @@
 # Speed Test Environment 
-NUM_BINS_LIST = [10, 10, 10, 10, 10]
-STATE_SIZE = 10**5
+NUM_BINS_LIST = [10, 10, 10, 10, 10, 10]
+STATE_SIZE = 10**6
 # Q Learning Agent
 LEARNING_RATE = 0.1
 DISCOUNT_FACTOR = 0.99

@@ -9,15 +9,15 @@ from constants import (
     STATE_SIZE
 )
 
-import numpy as np
-import random
-from constants import (
-    LEARNING_RATE, 
-    DISCOUNT_FACTOR,
-    EPS, 
-    EPS_DECAY, 
-    EPS_MIN
-)
+
+def tuple_to_integer(x):
+    y = 0
+    p = 1
+    for i in range(len(x)):
+        y += x[-i-1]*p
+        p*= 10
+    return y
+
 
 class QLearningAgent:
     def __init__(self, env, learning_rate=LEARNING_RATE, discount_factor= DISCOUNT_FACTOR, epsilon=EPS, epsilon_decay=EPS_DECAY, epsilon_min=EPS_MIN):
@@ -35,7 +35,7 @@ class QLearningAgent:
         for state in self._enumerate_states():
             if index >= self.q_table.shape[0]:
                 print("Index exceeds Q-table size:", index,"STATE ", state)
-            self.state_index_map[state] = index
+            self.state_index_map[state] = tuple_to_integer(state)
             index += 1
 
         print("Q-table size:", self.q_table.shape)

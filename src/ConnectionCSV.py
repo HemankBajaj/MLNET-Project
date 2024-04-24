@@ -1,8 +1,118 @@
-from scapy.all import rdpcap
+from scapy.all import *
+import dpkt
+
 import pandas as pd           
 import numpy as np             
 from datetime import datetime
 import os 
+
+
+from multiprocessing import Pool
+import subprocess
+import time 
+# Define lists for IP, TCP, and UDP fields
+ip_fields = ['src_ip', 'dst_ip', 'len', 'proto']
+tcp_fields = ['sport', 'dport', 'seq', 'ack', 'off', 'flags', 'win', 'sum', 'urp', 'opts', "ulen"]
+udp_fields = ['sport', 'dport', 'ulen', 'sum']
+
+# Function to extract IPv4 fields from data
+def get_ip4_fields(data):
+    src = socket.inet_ntoa(data.src)
+    dst = socket.inet_ntoa(data.dst)
+    plen = data.len
+    proto = data.p
+    return [src, dst, plen, proto]
+
+# Function to extract IPv6 fields from data
+def get_ip6_fields(data):
+    src = socket.inet_ntop(socket.AF_INET6, data.src)
+    dst = socket.inet_ntop(socket.AF_INET6, data.dst)
+    plen = data.plen
+    proto = data.p
+    return [src, dst, plen, proto]
+
+# Function to extract TCP fields
+def get_tcp_fields(tcp):
+    fields = []
+    for field in tcp_fields:
+        if field == "ulen":
+            fields.append(len(tcp.data))
+        else:
+            fields.append(getattr(tcp, field))
+    return fields
+
+# Function to extract UDP fields
+def get_udp_fields(udp):
+    fields = []
+    for field in udp_fields:
+        fields.append(getattr(udp, field))
+    return fields
+
+# Function to convert pcap file to DataFrame
+def pcap_to_df(file_path):
+    # Open the pcap file
+    f = open(file_path, 'rb')
+    # with gzip.open(file_path, 'rb') as fi:
+        # f = fi.read()
+    # Create a pcap reader
+    pcap = dpkt.pcap.Reader(f)
+    # List to store extracted fields
+    fields_list = []
+    # Iterate through each packet in the pcap file
+    for ts, buf in pcap:
+        
+        fields = [ts]
+        # Parse the Ethernet frame
+        eth = dpkt.ethernet.Ethernet(buf)
+        # Get the IP packet
+        ip = eth.data
+        ip_type = "ipv4"
+        
+        
+        # Check if it is an IPv4 or IPv6 packet
+        if isinstance(ip, dpkt.ip.IP):
+            fields += get_ip4_fields(ip)
+        elif isinstance(ip, dpkt.ip6.IP6):
+            fields += get_ip6_fields(ip)
+            ip_type = "ipv6"
+        else:
+            continue
+            
+        # Create dummy lists for TCP and UDP fields
+        dummy_tcp_fields = [None for x in tcp_fields]
+        dummy_udp_fields = [None for x in udp_fields]
+        # Check the transport protocol and extract fields accordingly
+        if fields[-1] == 17:  # UDP
+            transport_fields = get_udp_fields(ip.data) + dummy_tcp_fields
+        elif fields[-1] == 6:  # TCP
+            transport_fields = dummy_udp_fields + get_tcp_fields(ip.data)
+        else:
+            continue
+        
+        # Combine IP, UDP, and TCP fields
+        fields += transport_fields
+        fields_list.append(fields)
+    
+    udp_fields_name = [f"udp_{x}" for x in udp_fields]
+    tcp_fields_name = [f"tcp_{x}" for x in tcp_fields]
+    field_names = ['Timestamp'] + ip_fields + udp_fields_name + tcp_fields_name
+    # Create a DataFrame from the list of fields
+    df = pd.DataFrame(fields_list, columns=field_names)
+    # print(df.head())
+    return df
+
+def formatting_df(df):
+    # print(df.columns)
+    df['Source IP'] = df['src_ip']
+    df['Destination IP'] = df['dst_ip']
+    df['Source Port'] = df['tcp_sport']
+    df['Destination Port'] = df['tcp_dport']
+    df['Payload Length'] = df['len']
+
+    df = df[['Timestamp', 'Source IP', 'Destination IP', 'Source Port', 'Destination Port', 'Payload Length']]
+    # print(df.columns)
+    # ['Timestamp', 'Source IP', 'Destination IP',  'Source Port', 'Destination Port', 'Payload Length']
+    return df.dropna(how='any')
 
 def readPCAP(directory):   
     """
@@ -13,6 +123,15 @@ def readPCAP(directory):
         for root, dirs, files in os.walk(folder):
             for file in files:
                 if file.endswith(".pcap.gz"):
+                    # os.system(f"gzip -d {file}")
+                    # print(file)
+                    pcap_gz_path =  os.path.join(root, file)
+                    os.system(f"gzip -d {pcap_gz_path}")
+                    # print(pcap_gz_path)
+                    file_name = os.path.splitext(pcap_gz_path)[0] # remove .gz
+                    # print(file_name)
+                    pcap_files.append(os.path.join(root, file_name))
+                elif file.endswith(".pcap"):
                     pcap_files.append(os.path.join(root, file))
         return pcap_files
 
@@ -25,7 +144,7 @@ class ConnectionCSV:
         def cache_dataframe(pcap_file):
             """
             Assumes TCP packets only
-            """
+        
             packets = rdpcap(pcap_file)
             # Extract fields from each packet
             fields_list = []
@@ -39,7 +158,9 @@ class ConnectionCSV:
             
             # Create DataFrame
             df = pd.DataFrame(fields_list, columns=['Timestamp', 'Source IP', 'Destination IP', 'Length', 'Protocol', 'Transport Protocol', 'Source Port', 'Destination Port', 'Payload Length', 'Checksum'])
-    
+            """
+            df = pcap_to_df(pcap_file)
+            df = formatting_df(df)
             def epoch_to_datetime_string(epoch_time):
                 dt_obj = datetime.fromtimestamp(int(epoch_time))            
                 datetime_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
@@ -55,7 +176,7 @@ class ConnectionCSV:
             # Check if group has at least 20 packets and time difference is at least 9.9 seconds
             if len(df) < 20 or df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'] < 9.9:
                 return 
-            print(df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'])
+            # print(df.iloc[-1]['Timestamp'] - df.iloc[0]['Timestamp'])
             client_ip = df.iloc[0]['Source IP']
             server_ip = df.iloc[0]['Destination IP']
 
@@ -68,7 +189,8 @@ class ConnectionCSV:
                     'Total Time': [],
                     'Upload Bytes': [],
                     'Download Bytes': [],
-                    'Cumulative Time': []
+                    'Cumulative Time': [], 
+                    "Average RTT" : [], 
             }
             
             for group_df in group_dfs:
@@ -77,18 +199,21 @@ class ConnectionCSV:
 
                 # Calculate upload bytes
                 upload_bytes = group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Payload Length'].sum()
-
+                upload_packets = len(group_df[(group_df['Source IP'] == client_ip) & (group_df['Destination IP'] == server_ip)]['Payload Length'])
                 # Calculate download bytes
                 download_bytes = group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Payload Length'].sum()
+                download_packets = len(group_df[(group_df['Source IP'] == server_ip) & (group_df['Destination IP'] == client_ip)]['Payload Length'])
 
+                average_rtt = float(total_time)/(1e-6 + min(upload_packets, download_packets))
                 # Update cumulative time
                 cumulative_time += total_time
-                print(total_time, type(total_time))
+                # print(total_time, type(total_time))
                 # Append results
                 dict_grp["Total Time"].append(float(total_time))
                 dict_grp["Upload Bytes"].append(float(upload_bytes))
                 dict_grp["Download Bytes"].append(float(download_bytes))
                 dict_grp["Cumulative Time"].append(float(cumulative_time))
+                dict_grp["Average RTT"].append(float(average_rtt))
 
             df_conn = pd.DataFrame(dict_grp)
 
@@ -109,12 +234,35 @@ class ConnectionCSV:
 
 
 
-if __name__ == "__main__":
-    data_directory = "../sample_data/20240301T000205.745148Z-pcap-mlab2-gru02-ndt/"
-    pcap_list = readPCAP(data_directory)
+# if __name__ == "__main__":
+#     data_directory = "/home/hemankbajaj/Desktop/Semester-8/MLNET/MLNET-Project/sample_data/20240301T000205.745148Z-pcap-mlab2-gru02-ndt"
+#     pcap_list = readPCAP(data_directory)
+#     # print(pcap_list)
+#     # caching the first 10 pcap files
+#     start = time.time()
+#     for i in range(len(pcap_list)):
+#         print(i)
+#         conn = ConnectionCSV(pcap_list[i])
+#         print("OK")
+#     end = time.time()
 
-    # caching the first 10 pcap files
-    for i in range(10):
-        conn = ConnectionCSV(pcap_list[i])
-        print("OK")
-    print("Cached Connection CSVs")
+#     print("Cached Connection CSVs in ", end-start, "sec ")
+        
+def cache_connection_csv(pcap_file):
+    conn = ConnectionCSV(pcap_file)
+    print("Cached:", pcap_file)
+
+if __name__ == "__main__":
+    data_directory = "/home/hemankbajaj/Desktop/Semester-8/MLNET/MLNET-Project/sample_data/20240301T000205.745148Z-pcap-mlab2-gru02-ndt"
+    pcap_list = readPCAP(data_directory)
+    
+    num_processes = os.cpu_count()  # Use all available CPU cores
+    
+    start = time.time()
+
+    # Create a pool of worker processes
+    with Pool(num_processes) as pool:
+        # Map the cache_connection_csv function to the pcap_list
+        pool.map(cache_connection_csv, pcap_list)
+    end = time.time()
+    print("Cached Connection CSVs in", end - start, "seconds")
