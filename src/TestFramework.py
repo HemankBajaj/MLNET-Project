@@ -65,9 +65,7 @@ class TestFramework:
         self.current_download_speed = 0
         self.current_upload_speed = 0
         self.throughPutQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs, adding dummy values for now (keeping std deviation super high for dummy)
-        self.rttQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs
         self.prevThroughPut = None  # previous throughput to update the differences
-        self.prevRTT = None
         self.prev_time = 0
 
         self.upload_error = None 
@@ -76,6 +74,9 @@ class TestFramework:
 
         self.sent_packets = 0
         self.received_packets = 0
+
+        self.speed_test_type = None 
+
 
     def _discretize_state(self, observation):
         state_bins = []
@@ -91,16 +92,13 @@ class TestFramework:
         tr1 = self.throughPutQueue[0]
         tr2 = self.throughPutQueue[1]
         tr3 = self.throughPutQueue[2]
-        rtt1 = self.rttQueue[0]
-        rtt2 = self.rttQueue[1]
-        rtt3 = self.rttQueue[2]
         # error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
         # error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
 
         # mean_squared_error = math.sqrt((math.pow(error_download, 2) + math.pow(error_upload, 2))/2)
 
         # Discretize observation
-        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99), min(rtt1, 0.99), min(rtt2, 0.99), min(rtt3, 0.99)]
+        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99)]
         discretized_observation = self._discretize_state(observation)
 
         return discretized_observation
@@ -110,10 +108,11 @@ class TestFramework:
         done = False 
         cnt = 0
         while not done:
+            self.current_index += 1
             if self.current_index >= len(self.df):
                 done = True 
                 break 
-            self.current_index += 1
+            
             packet = self.df.iloc[self.current_index]
 
             self.current_time = float(packet["Timestamp"] - self.df["Timestamp"].iloc[0])
@@ -128,24 +127,21 @@ class TestFramework:
             self.current_upload_speed = self.upload_bytes / (self.current_time + 1e-6)
 
             
-
+            # Decide the speed test type while the agent polls for decision
             if self.current_time - self.prev_time > 0.5:
                 cnt += 1
                 total_time = self.current_time - self.prev_time
-                currentRTT = total_time/(1e-6 + min(self.sent_packets, self.received_packets))
                 self.current_throughPut = self.current_bytes_transferred/(self.current_time + 1e-6)
                 self.sent_packets = 0
                 self.received_packets = 0
                 self.prev_time = self.current_time 
 
-                # Update rttQueue, ThroughPutQueue
-                if self.prevRTT != None:
-                    rttChange = abs(currentRTT - self.prevRTT)
-                    rtt_proxy = math.tanh(rttChange/currentRTT)
-                    self.rttQueue.append(rtt_proxy)
-                    self.rttQueue.pop(0)
-                self.prevRTT = currentRTT
+                if self.total_download_bytes > self.total_upload_bytes:
+                    self.speed_test_type = "DOWNLOAD"
+                else:
+                    self.speed_test_type = "UPLOAD"
 
+                # Update ThroughPutQueue
                 if self.prevThroughPut != None:
                     throughputChange = abs(self.current_throughPut - self.prevThroughPut)
                     throughput_proxy = math.tanh(throughputChange/self.current_throughPut)
@@ -180,7 +176,7 @@ class TestFramework:
         
 
     def get_results(self):
-        return self.upload_error, self.download_error, self.time_saved
+        return self.upload_error, self.download_error, self.time_saved, self.speed_test_type
         
      
 
@@ -188,7 +184,7 @@ if __name__ == "__main__":
     q_table = MatrixFileIO.read_matrix("q_table.txt")
     data_directory = "/home/hemankbajaj/Desktop/Semester-8/MLNET/MLNET-Project/PCAP_DATA"
     pcap_list = readPCAP(data_directory)
-    upload_error = []; download_error = []; time_saved = []
+    upload_error = []; download_error = []; time_saved = []; error_list = []
     tcs = 0
     for pcap in pcap_list:
         connection_df = ConnectionDF(pcap)
@@ -198,14 +194,21 @@ if __name__ == "__main__":
             print("Skipped")
             continue 
         try:
+        # if True:
             test_case = TestFramework(connection_df, q_table)
             test_case.simulate_test()
-            a, b, c = test_case.get_results()
-            upload_error.append(a)
-            download_error.append(b)
-            time_saved.append(c)
+            upload_error, download_error , ts , err_type = test_case.get_results()
+            time_saved.append(ts)
             tcs += 1
-            print(f"Running Stats {tcs} -> {len(connection_df.get_dataframe())} packets: \n\tUpload Error: {np.array(upload_error).mean()} \n\tDownload Error: {np.array(download_error).mean()}, \n\tFraction Of Time Saved: {np.array(time_saved).mean()}")
+            if err_type == "UPLOAD":
+                error_list.append(upload_error)
+                error = upload_error
+            else:
+                error_list.append(download_error)
+                error = download_error
+            
+            print(f"STATS FOR CURRENT TEST {tcs} -> {len(connection_df.get_dataframe())} packets: \n\t{err_type} Error : {error} \n\tFraction of Time Saved :{ts}")
+            print(f"AVERAGE RUNNING STATS {tcs} -> {len(connection_df.get_dataframe())} packets: \n\t Error: {np.array(error_list).mean()} \n\tFraction Of Time Saved: {np.array(time_saved).mean()}")
         except Exception as e:
             print(f"Error occurred: {e}")
 

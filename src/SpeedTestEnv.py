@@ -11,9 +11,6 @@ FeatureList :
     - Relative Change in Absolute Throughput 1 (using tanh for normalization)  (Range 0-1)
     - Relative Change in Absolute Throughput 2 (using tanh for normalization)  (Range 0-1)
     - Relative Change in Absolute Throughput 3 (using tanh for normalization)  (Range 0-1)
-    - Relative Change in Absolute RTT 1 (using tanh for normalization)  (Range 0-1)
-    - Relative Change in Absolute RTT 2 (using tanh for normalization)  (Range 0-1)
-    - Relative Change in Absolute RTT 3 (using tanh for normalization)  (Range 0-1)
 
     6 tuple represent a state -> Deci Descretization of each state element -> 10^6 total states 
 
@@ -71,13 +68,20 @@ class SpeedTestEnv(gym.Env):
         self.current_time = 0
         
 
+        # Flag to indicate if download or upload test
+        self.speed_test_type = None 
+        if self.total_download_bytes > self.total_upload_bytes:
+            self.speed_test_type = "DOWNLOAD"
+        else: 
+            self.speed_test_type = "UPLOAD"
+
         # features 
         self.current_download_speed = 0
         self.current_upload_speed = 0
         self.throughPutQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs, adding dummy values for now (keeping std deviation super high for dummy)
-        self.rttQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs
+        # self.rttQueue = [1e9, 2e9, 3e9] # stores the relative differences in throughputs
         self.prevThroughPut = None  # previous throughput to update the differences
-        self.prevRTT = None
+        # self.prevRTT = None
 
     def _discretize_state(self, observation):
         state_bins = []
@@ -107,16 +111,6 @@ class SpeedTestEnv(gym.Env):
 
                 self.current_throughPut = self.current_bytes_transferred/(self.current_time + 1e-6)
 
-                currentRTT = packet_group["Average RTT"]
-
-                # Update rttQueue, ThroughPutQueue
-                if self.prevRTT != None:
-                    rttChange = abs(currentRTT - self.prevRTT)
-                    rtt_proxy = math.tanh(rttChange/currentRTT)
-                    self.rttQueue.append(rtt_proxy)
-                    self.rttQueue.pop(0)
-                self.prevRTT = currentRTT
-
                 if self.prevThroughPut != None:
                     throughputChange = abs(self.current_throughPut - self.prevThroughPut)
                     throughput_proxy = math.tanh(throughputChange/self.current_throughPut)
@@ -125,7 +119,6 @@ class SpeedTestEnv(gym.Env):
                 self.prevThroughPut = self.current_throughPut
 
 
-                rtt_reward = weighted_average(self.rttQueue)
                 throughput_reward = weighted_average(self.throughPutQueue)
                 error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
                 error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
@@ -140,13 +133,20 @@ class SpeedTestEnv(gym.Env):
         x = self.current_index/len(self.df)
         reward = 0
         # reward =  100*math.log(-x + math.e)  # Penalty for each step, higher reward for exploration initially then the reward dies down exponentially
-        if max(self.rttQueue) == 9 or max(self.throughPutQueue) == 9: # no reward if just started state
+        if max(self.throughPutQueue) == 9: # no reward if just started state
             reward += -10
         elif done:
             reward += 2  # Reward for completing connection
         else:
-            reward = 1 -(2*capValue(rtt_reward) + 5*capValue(throughput_reward) + 5*error_download_reward + 5*error_upload_reward)/(2 + 5 + 5 + 5)
-        
+            # reward for lesser error and higher accuracy
+            if self.speed_test_type == "DOWNLOAD":
+                reward = 1 -(5*capValue(throughput_reward) + 5*error_download_reward)/(5 + 5)
+                if error_download_reward <= 0.1:
+                    reward += 100
+            else:
+                reward = 1 -(5*capValue(throughput_reward) + 5*error_upload_reward)/(5 + 5)
+                if error_upload_reward <= 0.1:
+                    reward += 100
 
         # Get next state
         next_state = self._get_observation()
@@ -168,16 +168,13 @@ class SpeedTestEnv(gym.Env):
         tr1 = self.throughPutQueue[0]
         tr2 = self.throughPutQueue[1]
         tr3 = self.throughPutQueue[2]
-        rtt1 = self.rttQueue[0]
-        rtt2 = self.rttQueue[1]
-        rtt3 = self.rttQueue[2]
         # error_download = abs(self.current_download_speed - self.actual_download_speed)/self.actual_download_speed
         # error_upload = abs(self.current_upload_speed - self.actual_upload_speed)/self.actual_upload_speed
 
         # mean_squared_error = math.sqrt((math.pow(error_download, 2) + math.pow(error_upload, 2))/2)
 
         # Discretize observation
-        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99), min(rtt1, 0.99), min(rtt2, 0.99), min(rtt3, 0.99)]
+        observation = [min(tr1, 0.99), min(tr2, 0.99), min(tr3, 0,99)]
         discretized_observation = self._discretize_state(observation)
 
         return discretized_observation
